@@ -198,3 +198,19 @@ struct LaunchdTests {
         #expect(!FileManager.default.fileExists(atPath: scheduler.folder.appendingPathComponent("local.schedule.nope.plist").path))
     }
 }
+
+@Suite("Triggers in words")
+struct SummaryTests {
+
+    @Test("A schedule reads back as it was asked for")
+    func words() throws {
+        #expect(Trigger.calendar(try ScheduleParser.slots(times: ["07:00"], days: [1, 2, 3, 4, 5])).summary == "weekdays at 07:00")
+        #expect(Trigger.calendar(try ScheduleParser.slots(times: ["19:30", "07:00"], days: [])).summary == "daily at 07:00, 19:30")
+        #expect(Trigger.calendar(try ScheduleParser.slots(times: ["09:00"], days: [1, 3])).summary == "mon,wed at 09:00")
+        #expect(Trigger.calendar(try ScheduleParser.slots(times: ["09:00"], days: [], dayOfMonth: 1)).summary == "on day 1 at 09:00")
+        #expect(Trigger.interval(900).summary == "every 15m")
+        #expect(Trigger.interval(7200).summary == "every 2h")
+        #expect(Trigger.interval(90).summary == "every 90s")
+        #expect(Trigger.atLoad.summary == "at login")
+    }
+}
