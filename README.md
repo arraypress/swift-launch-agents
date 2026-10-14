@@ -37,6 +37,13 @@ try scheduler.remove("backup")
   `/opt/homebrew/bin:/usr/local/bin` first unless they set PATH themselves, and
   the program is resolved to an absolute path when added — refused then, not at
   run time, when it does not exist.
+- **Folders, file by file.** `Trigger.watch([paths])` is launchd's `WatchPaths`: the
+  job runs when a file arrives in, leaves or is renamed in a folder — but launchd
+  never says which. `NewFiles.pending(_:seen:)` picks the files still to handle:
+  not hidden, not an unfinished download (`.crdownload`, `.part`, `.download`…),
+  not changed in the last 2 s, and not already handled (name + size + date, so a
+  newer copy counts again). Measured live: an existing file skipped, each new file
+  handled once, a `.crdownload` left until it was renamed to the finished name.
 - **Somewhere to look.** Output and errors go to `~/Library/Logs/schedule/<name>.log`
   unless given elsewhere; `logs(of:)` reads the tail.
 

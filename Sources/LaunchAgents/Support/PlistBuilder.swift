@@ -34,6 +34,8 @@ public enum PlistBuilder {
             plist["StartCalendarInterval"] = entries.count == 1 ? entries[0] as Any : entries as Any
         case .interval(let seconds):
             plist["StartInterval"] = seconds
+        case .watch(let paths):
+            plist["WatchPaths"] = paths
         case .atLoad, .manual:
             break
         }
@@ -62,6 +64,7 @@ public enum PlistBuilder {
         if let one = plist["StartCalendarInterval"] as? [String: Any] { return .calendar([slot(one)]) }
         if let many = plist["StartCalendarInterval"] as? [[String: Any]] { return .calendar(many.map(slot)) }
         if let seconds = plist["StartInterval"] as? Int { return .interval(seconds) }
+        if let paths = plist["WatchPaths"] as? [String], !paths.isEmpty { return .watch(paths) }
         if plist["RunAtLoad"] as? Bool == true { return .atLoad }
         return .manual
     }

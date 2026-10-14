@@ -19,7 +19,14 @@ public extension Trigger {
         case .atLoad: return "at login"
         case .interval(let seconds): return "every " + Self.duration(seconds)
         case .calendar(let slots): return Self.describe(slots)
+        case .watch(let paths): return "when " + paths.map(Self.abbreviated).joined(separator: " or ") + " changes"
         }
+    }
+
+    /// A path with the home folder written as `~`.
+    static func abbreviated(_ path: String) -> String {
+        let home = NSHomeDirectory()
+        return path == home ? "~" : path.hasPrefix(home + "/") ? "~" + path.dropFirst(home.count) : path
     }
 
     /// `90s`, `15m`, `2h`, `1d` — the largest unit that divides evenly.

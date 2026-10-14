@@ -214,3 +214,42 @@ struct SummaryTests {
         #expect(Trigger.atLoad.summary == "at login")
     }
 }
+
+@Suite("Watched folders")
+struct WatchTests {
+
+    @Test("A watch job round-trips through its plist as WatchPaths")
+    func roundTrip() {
+        let spec = JobSpec(name: "x", arguments: ["/bin/echo"], trigger: .watch(["/tmp/inbox"]))
+        let plist = PlistBuilder.plist(for: spec, label: "l")
+        #expect(plist["WatchPaths"] as? [String] == ["/tmp/inbox"])
+        #expect(PlistBuilder.trigger(of: plist) == .watch(["/tmp/inbox"]))
+        #expect(Trigger.watch([NSHomeDirectory() + "/Drop"]).summary == "when ~/Drop changes")
+    }
+
+    @Test("Only finished, unseen, visible files are pending, oldest first")
+    func pending() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        func file(_ name: String, _ age: TimeInterval, size: Int64 = 10) -> FileStamp {
+            FileStamp(name: name, size: size, modified: now.addingTimeInterval(-age))
+        }
+        let done = file("old.pdf", 600)
+        let listing = [file("b.pdf", 30), file("a.pdf", 60), done, file(".DS_Store", 60),
+                       file("big.mov.crdownload", 60), file("photo.jpg.part", 60), file("growing.csv", 0.5)]
+        let names = NewFiles.pending(listing, seen: [done.identity], now: now).map(\.name)
+        #expect(names == ["a.pdf", "b.pdf"])
+        // A newer copy under the same name counts as new again.
+        #expect(NewFiles.pending([file("old.pdf", 60, size: 99)], seen: [done.identity], now: now).count == 1)
+    }
+
+    @Test("The listing reads regular files only")
+    func listing() throws {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("watch-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder.appendingPathComponent("sub"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: folder) }
+        try Data("hi".utf8).write(to: folder.appendingPathComponent("a.txt"))
+        let listing = try NewFiles.listing(of: folder)
+        #expect(listing.map(\.name) == ["a.txt"])
+        #expect(listing.first?.size == 2)
+    }
+}
