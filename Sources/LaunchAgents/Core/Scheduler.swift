@@ -47,8 +47,9 @@ public struct Scheduler: Sendable {
     /// Writes a job's plist, loads it, and checks launchd has it.
     ///
     /// The program is resolved to an absolute path first — launchd does not
-    /// search a PATH for the program itself — and its output goes to
-    /// `<logFolder>/<name>.log` unless the spec says otherwise.
+    /// search a PATH for the program itself, and a Homebrew program is named
+    /// by its upgrade-stable `opt/` path (``resolve(_:path:)``) — and its
+    /// output goes to `<logFolder>/<name>.log` unless the spec says otherwise.
     ///
     /// - Parameters:
     ///   - spec: The job.
@@ -187,7 +188,8 @@ public struct Scheduler: Sendable {
         let arguments = plist["ProgramArguments"] as? [String] ?? [plist["Program"] as? String].compactMap { $0 }
         return Job(label: label, isOwn: Labels.isOwn(label), path: path.path, arguments: arguments, trigger: trigger,
                    standardOutPath: plist["StandardOutPath"] as? String,
-                   standardErrorPath: plist["StandardErrorPath"] as? String, status: status, nextRun: next)
+                   standardErrorPath: plist["StandardErrorPath"] as? String, status: status, nextRun: next,
+                   environment: plist["EnvironmentVariables"] as? [String: String])
     }
 
     static func read(_ url: URL) -> [String: Any]? {
@@ -195,21 +197,29 @@ public struct Scheduler: Sendable {
         return try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
     }
 
-    /// A program as an absolute path, searched for on `path` when bare.
+    /// A program as the absolute path a job should record: searched for on
+    /// `path` when bare, and a Homebrew program named by its upgrade-stable
+    /// `opt/` path rather than the versioned Cellar or `bin/`'s exec script
+    /// (``HomebrewPaths/stable(_:)``). Public so a caller that keeps a
+    /// command of its own — one launchd does not run directly — records it
+    /// the same way.
     ///
+    /// - Parameters:
+    ///   - program: A name, or a path (`~` allowed).
+    ///   - path: The PATH to search for a bare name.
     /// - Throws: ``LaunchAgentError/programNotFound(_:)``.
-    static func resolve(_ program: String, path: String) throws -> String {
+    public static func resolve(_ program: String, path: String = PlistBuilder.defaultPath) throws -> String {
         let expanded = (program as NSString).expandingTildeInPath
         if expanded.contains("/") {
             let absolute = URL(fileURLWithPath: expanded).standardizedFileURL.path
             guard FileManager.default.isExecutableFile(atPath: absolute) else {
                 throw LaunchAgentError.programNotFound(program)
             }
-            return absolute
+            return HomebrewPaths.stable(absolute)
         }
         for directory in path.split(separator: ":") {
             let candidate = "\(directory)/\(expanded)"
-            if FileManager.default.isExecutableFile(atPath: candidate) { return candidate }
+            if FileManager.default.isExecutableFile(atPath: candidate) { return HomebrewPaths.stable(candidate) }
         }
         throw LaunchAgentError.programNotFound(program)
     }

@@ -94,6 +94,25 @@ struct PlistTests {
         #expect((PlistBuilder.plist(for: own, label: "l")["EnvironmentVariables"] as? [String: String])?["PATH"] == "/bin")
     }
 
+    @Test("A job reads back the environment its plist sets, PATH included")
+    func environment() throws {
+        let spec = JobSpec(name: "x", arguments: ["/bin/echo"], trigger: .interval(60), environment: ["TOKEN_FILE": "a=b"])
+        let plist = PlistBuilder.plist(for: spec, label: "local.schedule.x")
+        let job = try Scheduler().job("local.schedule.x", plist: plist, path: URL(fileURLWithPath: "/tmp/x.plist"), status: nil)
+        #expect(job.environment == ["TOKEN_FILE": "a=b", "PATH": PlistBuilder.defaultPath])
+        let bare = try Scheduler().job("l", plist: ["Label": "l", "ProgramArguments": ["/bin/echo"]],
+                                       path: URL(fileURLWithPath: "/tmp/l.plist"), status: nil)
+        #expect(bare.environment == nil, "a plist that sets none has none")
+    }
+
+    @Test("A Job encoded before it had an environment still decodes")
+    func olderJobDecodes() throws {
+        let older = #"{"label":"l","isOwn":false,"path":"/tmp/l.plist","arguments":["/bin/echo"],"trigger":{"manual":{}}}"#
+        let job = try JSONDecoder().decode(Job.self, from: Data(older.utf8))
+        #expect(job.environment == nil)
+        #expect(job.arguments == ["/bin/echo"])
+    }
+
     @Test("An at-login job runs at load")
     func atLoad() {
         let plist = PlistBuilder.plist(for: JobSpec(name: "x", arguments: ["/bin/echo"], trigger: .atLoad), label: "l")
@@ -196,6 +215,64 @@ struct LaunchdTests {
             try scheduler.add(JobSpec(name: "nope", arguments: ["no-such-program-xyz"], trigger: .manual))
         }
         #expect(!FileManager.default.fileExists(atPath: scheduler.folder.appendingPathComponent("local.schedule.nope.plist").path))
+    }
+}
+
+@Suite("Homebrew programs")
+struct HomebrewPathTests {
+
+    /// A Homebrew prefix in a scratch folder, laid out as `brew install`
+    /// lays it out: a versioned Cellar, an opt link, and bin entries — a
+    /// symlink to an exec script for a libexec tool, a symlink to the binary
+    /// for a plain one.
+    func prefix() throws -> URL {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("brew-\(UUID().uuidString)").resolvingSymlinksInPath()
+        let fm = FileManager.default
+        for folder in ["Cellar/imessage/0.1.1/libexec", "Cellar/imessage/0.1.1/bin", "Cellar/jq/1.7/bin", "bin", "opt"] {
+            try fm.createDirectory(at: root.appendingPathComponent(folder), withIntermediateDirectories: true)
+        }
+        func executable(_ relative: String, _ text: String) throws {
+            let url = root.appendingPathComponent(relative)
+            try Data(text.utf8).write(to: url)
+            try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: url.path)
+        }
+        try executable("Cellar/imessage/0.1.1/libexec/imessage", "\u{CF}\u{FA}binary")
+        try executable("Cellar/imessage/0.1.1/bin/imessage",
+                       "#!/bin/bash\nexec \"\(root.path)/Cellar/imessage/0.1.1/libexec/imessage\" \"$@\"\n")
+        try executable("Cellar/jq/1.7/bin/jq", "\u{CF}\u{FA}binary")
+        try fm.createSymbolicLink(atPath: root.appendingPathComponent("bin/imessage").path, withDestinationPath: "../Cellar/imessage/0.1.1/bin/imessage")
+        try fm.createSymbolicLink(atPath: root.appendingPathComponent("bin/jq").path, withDestinationPath: "../Cellar/jq/1.7/bin/jq")
+        try fm.createSymbolicLink(atPath: root.appendingPathComponent("opt/imessage").path, withDestinationPath: "../Cellar/imessage/0.1.1")
+        try fm.createSymbolicLink(atPath: root.appendingPathComponent("opt/jq").path, withDestinationPath: "../Cellar/jq/1.7")
+        return root
+    }
+
+    @Test("A Homebrew program is named through opt/, past bin's exec script")
+    func stable() throws {
+        let root = try prefix()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let p = root.path
+        #expect(HomebrewPaths.stable("\(p)/bin/imessage") == "\(p)/opt/imessage/libexec/imessage", "the script's target, not the script")
+        #expect(HomebrewPaths.stable("\(p)/Cellar/imessage/0.1.1/libexec/imessage") == "\(p)/opt/imessage/libexec/imessage",
+                "a versioned path, made upgrade-proof")
+        #expect(HomebrewPaths.stable("\(p)/bin/jq") == "\(p)/opt/jq/bin/jq", "a plain bin.install tool")
+        #expect(try Scheduler.resolve("imessage", path: "\(p)/bin:/usr/bin") == "\(p)/opt/imessage/libexec/imessage")
+    }
+
+    @Test("Anything else is left as it is")
+    func untouched() throws {
+        let root = try prefix()
+        defer { try? FileManager.default.removeItem(at: root) }
+        #expect(HomebrewPaths.stable("/bin/sh") == "/bin/sh")
+        #expect(try Scheduler.resolve("true", path: "/usr/bin:/bin") == "/usr/bin/true")
+        // A Cellar path whose opt link is gone (an uninstalled keg) stays as given.
+        try FileManager.default.removeItem(atPath: root.appendingPathComponent("opt/jq").path)
+        #expect(HomebrewPaths.stable("\(root.path)/bin/jq") == "\(root.path)/bin/jq")
+        // A script that is not Homebrew's exec script is not followed.
+        let other = root.appendingPathComponent("bin/other")
+        try Data("#!/bin/bash\necho hi\n".utf8).write(to: other)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: other.path)
+        #expect(HomebrewPaths.execTarget(of: other.path) == nil)
     }
 }
 

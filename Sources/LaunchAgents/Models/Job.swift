@@ -29,9 +29,13 @@ public struct Job: Sendable, Codable, Equatable {
     public let status: JobStatus?
     /// The next calendar run, when it has one.
     public let nextRun: Date?
+    /// The environment variables its plist sets, PATH included; nil when it
+    /// sets none. Optional so a `Job` encoded before this existed still decodes.
+    public let environment: [String: String]?
 
     public init(label: String, isOwn: Bool, path: String, arguments: [String], trigger: Trigger,
-                standardOutPath: String?, standardErrorPath: String?, status: JobStatus?, nextRun: Date?) {
+                standardOutPath: String?, standardErrorPath: String?, status: JobStatus?, nextRun: Date?,
+                environment: [String: String]? = nil) {
         self.label = label
         self.isOwn = isOwn
         self.path = path
@@ -41,6 +45,7 @@ public struct Job: Sendable, Codable, Equatable {
         self.standardErrorPath = standardErrorPath
         self.status = status
         self.nextRun = nextRun
+        self.environment = environment
     }
 
     /// The short name, without the prefix, for a job this tool made.

@@ -15,6 +15,7 @@ let job = try scheduler.add(JobSpec(
     trigger: .calendar(try ScheduleParser.slots(times: ["02:00"], days: try ScheduleParser.weekdays("weekdays")))))
 job.status?.state     // "not running" — loaded, waiting for 02:00
 job.nextRun           // the next weekday at 02:00
+job.environment       // what its plist sets, PATH included — how a caller reads back its own keys
 try scheduler.logs(of: "backup")
 try scheduler.remove("backup")
 ```
@@ -36,7 +37,13 @@ try scheduler.remove("backup")
   when tried by hand and fails at 07:00 with "command not found". Jobs get
   `/opt/homebrew/bin:/usr/local/bin` first unless they set PATH themselves, and
   the program is resolved to an absolute path when added — refused then, not at
-  run time, when it does not exist.
+  run time, when it does not exist. A Homebrew program is recorded by its
+  `opt/` path (`/opt/homebrew/opt/<formula>/libexec/<tool>`), which survives
+  an upgrade and is the binary itself, not `bin/`'s exec script
+  (`HomebrewPaths.stable`; `Scheduler.resolve` is public for commands a caller
+  runs itself). Measured: whichever path a job names, macOS's privacy checks
+  see the versioned Cellar binary — the kernel resolves the link and the
+  script execs — so no path keeps a Full Disk Access grant across an upgrade.
 - **Folders, file by file.** `Trigger.watch([paths])` is launchd's `WatchPaths`: the
   job runs when a file arrives in, leaves or is renamed in a folder — but launchd
   never says which. `NewFiles.pending(_:seen:)` picks the files still to handle:
